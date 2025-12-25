@@ -1,0 +1,112 @@
+# =============================================================================
+# SCRY REMOTE - SYSTEMD SERVICE
+# =============================================================================
+# Install: sudo cp scry-remote.service /etc/systemd/system/
+# Enable:  sudo systemctl enable scry-remote
+# Start:   sudo systemctl start scry-remote
+# =============================================================================
+
+[Unit]
+Description=Scry Remote - AI-Powered Screen Analysis and Control
+Documentation=https://github.com/divyamohan1993/scry
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=scry
+Group=scry
+WorkingDirectory=/opt/scry-remote
+
+# Environment
+Environment="PATH=/opt/scry-remote/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+
+# Start command
+ExecStart=/opt/scry-remote/venv/bin/uvicorn server.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --loop uvloop \
+    --http httptools \
+    --log-level info
+
+# Graceful shutdown
+ExecStop=/bin/kill -SIGTERM $MAINPID
+TimeoutStopSec=30
+
+# Restart policy
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# =============================================================================
+# SECURITY HARDENING
+# =============================================================================
+
+# Prevent privilege escalation
+NoNewPrivileges=true
+
+# Filesystem restrictions
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+
+# Allow writes only to specific directories
+ReadWritePaths=/opt/scry-remote/logs
+ReadWritePaths=/opt/scry-remote/temp
+
+# Network restrictions (allow only necessary)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# System call restrictions
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# Capability restrictions
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Memory execution restrictions
+MemoryDenyWriteExecute=true
+
+# Proc and kernel restrictions
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+
+# Clock and hostname restrictions
+ProtectClock=true
+ProtectHostname=true
+
+# Restrict realtime scheduling
+RestrictRealtime=true
+
+# Restrict namespace creation
+RestrictNamespaces=true
+
+# Lock personality
+LockPersonality=true
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=scry-remote
+
+# Log filtering
+LogLevelMax=info
+
+[Install]
+WantedBy=multi-user.target

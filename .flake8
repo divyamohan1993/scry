@@ -1,0 +1,9 @@
+[flake8]
+max-line-length = 120
+# E203: whitespace before ':' (black compatibility)
+# W503: line break before binary operator (black compatibility)
+ignore = E203, W503
+exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,venv, .venv
+count = True
+statistics = True
+show-source = True

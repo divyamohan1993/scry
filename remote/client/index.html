@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Scry Remote - AI-Powered Screen Analysis and Control">
+    <title>Scry Remote | Divine Your Answers</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <span class="logo">🔮</span>
+                <h1>Scry Remote</h1>
+            </div>
+            <div class="header-user" id="userInfo">
+                <img id="userAvatar" src="" alt="User" class="avatar">
+                <span id="userName"></span>
+                <button id="logoutBtn" class="btn btn-ghost">Logout</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Status Panel -->
+            <section class="status-panel glass-card">
+                <div class="status-indicator" id="statusIndicator">
+                    <div class="status-dot disconnected"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+                <div class="status-stats">
+                    <div class="stat">
+                        <span class="stat-value" id="framesProcessed">0</span>
+                        <span class="stat-label">Frames</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="commandsSent">0</span>
+                        <span class="stat-label">Commands</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="latency">--</span>
+                        <span class="stat-label">Latency</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <section class="control-panel glass-card">
+                <h2>Screen Sharing</h2>
+                <p class="description">
+                    Share your screen to enable AI-powered analysis.
+                    Scry will analyze your screen and provide automated responses.
+                </p>
+
+                <div class="button-group">
+                    <button id="startBtn" class="btn btn-primary btn-lg">
+                        <span class="btn-icon">📺</span>
+                        Start Screen Share
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger btn-lg" disabled>
+                        <span class="btn-icon">⏹️</span>
+                        Stop Sharing
+                    </button>
+                </div>
+
+                <!-- Preview -->
+                <div class="preview-container" id="previewContainer">
+                    <video id="previewVideo" autoplay muted playsinline></video>
+                    <div class="preview-overlay" id="previewOverlay">
+                        <span>No screen shared</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Log -->
+            <section class="activity-panel glass-card">
+                <div class="activity-header">
+                    <h2>Activity Log</h2>
+                    <button id="clearLogBtn" class="btn btn-ghost btn-sm">Clear</button>
+                </div>
+                <div class="activity-log" id="activityLog">
+                    <div class="log-entry log-info">
+                        <span class="log-time">--:--:--</span>
+                        <span class="log-message">Ready to connect...</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Command Queue -->
+            <section class="command-panel glass-card">
+                <h2>Pending Commands</h2>
+                <div class="command-queue" id="commandQueue">
+                    <div class="empty-state">
+                        <span>No pending commands</span>
+                    </div>
+                </div>
+                <div class="command-controls">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoExecute" checked>
+                        <span>Auto-execute commands</span>
+                    </label>
+                    <button id="executeAllBtn" class="btn btn-secondary" disabled>
+                        Execute All
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>
+                <a href="https://dmj.one" target="_blank">dmj.one</a> •
+                Scry Remote v1.0.0 •
+                <a href="https://github.com/divyamohan1993/scry" target="_blank">GitHub</a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Command Execution Canvas (Invisible) -->
+    <canvas id="commandCanvas" style="display: none;"></canvas>
+
+    <!-- Scripts -->
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/webrtc.js"></script>
+    <script src="/static/js/control.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>

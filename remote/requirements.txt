@@ -1,0 +1,37 @@
+# Scry Remote - Python Dependencies
+# Run: pip install -r requirements.txt
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# WebRTC
+aiortc>=1.6.0
+aiohttp>=3.9.0
+
+# Authentication
+authlib>=1.2.1
+itsdangerous>=2.1.2
+python-jose[cryptography]>=3.3.0
+httpx>=0.25.0
+
+# Session & Security
+starlette>=0.27.0
+
+# Image Processing
+Pillow>=10.0.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+
+# Google Gemini (for Scry Adapter)
+google-genai>=0.3.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Async utilities
+asyncio-throttle>=1.0.2
+
+# Logging
+loguru>=0.7.0

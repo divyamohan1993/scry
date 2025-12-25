@@ -1,0 +1,329 @@
+import sys
+import time
+import traceback
+
+import mss
+import pyautogui
+from PIL import Image
+
+try:
+    import keyboard
+except ImportError:
+    print(
+        "Error: 'keyboard' library not found. Please install it with 'pip install keyboard'."
+    )
+    sys.exit(1)
+
+import os
+import atexit
+from .config import (
+    DEV_MAX_ITERATIONS,
+    DEV_SAVE_SCREENSHOTS,
+    DEVELOPER_MODE,
+    ENABLE_DETAILED_MODE,
+    HOTKEY_DELAY,
+    HOTKEY_DESCRIPTIVE,
+    HOTKEY_MCQ,
+    INITIAL_WAIT,
+    MANUAL_MODE,
+    POLL_INTERVAL,
+    POST_ACTION_WAIT,
+    SCREENSHOTS_DIR,
+    RUNTIME_DIR,
+    TYPING_WPM_MAX,
+    TYPING_WPM_MIN,
+    UPDATE_CHECK_INTERVAL_SECONDS,
+    REQUIRE_LICENSE,
+    validate_license,
+)
+from .gemini import get_gemini_response
+from .logger import get_logger
+from .utils.desktop_manager import switch_to_input_desktop, type_text_human_like
+from .utils.mouse import click_at, move_away_from_options, simulate_reading_pause, reset_fatigue
+from .utils.screen import find_text_coordinates
+from .updater import check_and_update
+
+logger = get_logger("Main")
+
+
+# State Variables
+last_processed_question = None
+
+def create_pid_file():
+    """Creates a PID file for the current process."""
+    pid_path = os.path.join(RUNTIME_DIR, "app.pid")
+    try:
+        with open(pid_path, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        logger.error(f"Failed to create PID file: {e}")
+
+def remove_pid_file():
+    """Removes the PID file on exit."""
+    pid_path = os.path.join(RUNTIME_DIR, "app.pid")
+    if os.path.exists(pid_path):
+        try:
+            os.remove(pid_path)
+        except Exception:
+            pass
+
+
+
+def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
+    """
+    Captures screen, sends to Gemini, and acts on it.
+    mode_hint: 'MCQ' or 'DESCRIPTIVE' (or None)
+    bypass_idempotency: If True, ignores whether the question was seen before.
+    Returns: (bool action_taken, str question_text)
+    """
+    global last_processed_question
+
+    # 0. Ensure we are on the active desktop
+    if not switch_to_input_desktop():
+        logger.warning(
+            "Could not switch to input desktop. Screen capture might be black."
+        )
+
+    # 1. Capture Screen
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]
+        sct_img = sct.grab(monitor)
+        screenshot = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+
+    if DEVELOPER_MODE and DEV_SAVE_SCREENSHOTS:
+        timestamp = str(int(time.time()))
+        path = os.path.join(SCREENSHOTS_DIR, f"screen_{timestamp}.png")
+        screenshot.save(path)
+
+    # 2. Gemini Analysis
+    logger.debug(f"Analyzing screen (Hint: {mode_hint})...")
+    gemini_result = get_gemini_response(
+        screenshot,
+        enable_detailed_mode=ENABLE_DETAILED_MODE,
+        question_type_hint=mode_hint,
+    )
+
+    if not gemini_result:
+        logger.warning("Empty response from AI.")
+        return False, last_processed_question
+
+    q_type = gemini_result.get("type", "SAFE")
+    question_text = gemini_result.get("question")
+    answer_text = gemini_result.get("answer_text")
+
+    # Idempotency Check (Skip if Auto Mode and same question)
+    if (
+        not bypass_idempotency
+        and question_text
+        and question_text == last_processed_question
+    ):
+        logger.info("Same question detected. Skipping.")
+        return False, last_processed_question
+
+    if q_type == "SAFE" or not answer_text:
+        logger.info(f"No actionable question detected ({q_type}).")
+        return False, question_text
+
+    logger.info(f"QUESTION DETECTED ({q_type}). Target: '{answer_text[:50]}...'")
+    action_taken = False
+
+    # Force type if hint provides it (Override Gemini classification if needed, or trust Gemini with hint)
+    # The prompt usually handles it, but we can verify.
+
+    # --- MCQ LOGIC ---
+    if q_type == "MCQ":
+        logger.info("Processing MCQ...")
+        coordinates = find_text_coordinates(screenshot, answer_text)
+
+        if coordinates:
+            x, y = coordinates
+            final_x = x + monitor["left"]
+            final_y = y + monitor["top"]
+            
+            # Simulate human reading/thinking before clicking
+            simulate_reading_pause(0.3, 1.2)
+            
+            logger.info(f"Clicking at ({final_x}, {final_y})")
+            click_at(final_x, final_y)
+            move_away_from_options()  # Move mouse away after selection
+            action_taken = True
+        else:
+            # Failsafe
+            bbox = gemini_result.get("bbox")
+            if bbox and len(bbox) == 4:
+                ymin, xmin, ymax, xmax = bbox
+                monitor_w, monitor_h = monitor["width"], monitor["height"]
+
+                center_x = int(((xmin + xmax) / 2 / 1000) * monitor_w) + monitor["left"]
+                center_y = int(((ymin + ymax) / 2 / 1000) * monitor_h) + monitor["top"]
+                
+                # Simulate human reading/thinking before clicking
+                simulate_reading_pause(0.3, 1.2)
+
+                logger.info(f"FAILSAFE Click: ({center_x}, {center_y})")
+                click_at(center_x, center_y)
+                move_away_from_options()  # Move mouse away after selection
+                action_taken = True
+            else:
+                logger.error("Failsafe Failed: No valid bbox.")
+
+    # --- DESCRIPTIVE LOGIC ---
+    elif q_type == "DESCRIPTIVE" and ENABLE_DETAILED_MODE:
+        if "bbox" in gemini_result and gemini_result["bbox"]:
+            logger.info("Clicking text area to focus...")
+            bbox = gemini_result["bbox"]
+            if len(bbox) == 4:
+                ymin, xmin, ymax, xmax = bbox
+                monitor = mss.mss().monitors[
+                    1
+                ]  # We need to re-get monitor dims or cache them.
+                # Actually 'monitor' var is local to Capture block. We need to handle this cleaner.
+                # Re-invoking mss here is cheap enough or we should move monitor to outer scope.
+                # Let's just grab valid monitor info again purely for dimension calculation.
+                with mss.mss() as sct_temp:
+                    monitor_temp = sct_temp.monitors[1]
+                    monitor_w, monitor_h = monitor_temp["width"], monitor_temp["height"]
+                    center_x = (
+                        int(((xmin + xmax) / 2 / 1000) * monitor_w)
+                        + monitor_temp["left"]
+                    )
+                    center_y = (
+                        int(((ymin + ymax) / 2 / 1000) * monitor_h)
+                        + monitor_temp["top"]
+                    )
+                    click_at(center_x, center_y)
+                    time.sleep(0.5)
+
+        type_text_human_like(
+            answer_text, min_wpm=TYPING_WPM_MIN, max_wpm=TYPING_WPM_MAX
+        )
+        action_taken = True
+
+    if action_taken and question_text:
+        last_processed_question = question_text
+
+    return action_taken, last_processed_question
+
+
+def manual_trigger(mode_hint):
+    """
+    Blocking function called when hotkey is pressed.
+    """
+    logger.info(f"MANUAL TRIGGER DETECTED: {mode_hint}")
+    logger.info(f"Waiting {HOTKEY_DELAY}s before capture...")
+    time.sleep(HOTKEY_DELAY)
+
+    action, _ = process_screen_cycle(mode_hint=mode_hint, bypass_idempotency=True)
+
+    if action:
+        logger.info("Manual Action Completed.")
+    else:
+        logger.warning("Manual Action Failed or No Question Found.")
+
+    logger.info("Returning to silent background mode...")
+
+
+def main():
+    if not DEVELOPER_MODE:
+        pyautogui.FAILSAFE = False
+
+    logger.info("🔮 Scry Started - Divine your answers.")
+    
+    # Register PID file cleanup
+    atexit.register(remove_pid_file)
+    create_pid_file()
+
+    
+    # Check for updates
+    try:
+        check_and_update()
+    except Exception as e:
+        logger.error(f"Update check failed: {e}")
+
+    # ==========================================================================
+    # LICENSE VALIDATION (if enabled)
+    # ==========================================================================
+    if REQUIRE_LICENSE:
+        logger.info("🔐 Session license required. Validating...")
+        if not validate_license():
+            logger.error("❌ License validation failed. Exiting.")
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                root = tk.Tk()
+                root.withdraw()
+                messagebox.showerror(
+                    "License Required",
+                    "This software requires a valid license key to run.\n\n"
+                    "Please contact the administrator for a license key."
+                )
+                root.destroy()
+            except Exception:
+                pass
+            sys.exit(1)
+        logger.info("✓ License validated successfully.")
+
+    # Reset mouse fatigue counter for fresh session
+    reset_fatigue()
+
+    logger.info(f"Mode: {'MANUAL (Hotkeys Only)' if MANUAL_MODE else 'AUTO (Loop)'}")
+    logger.info(f"Detailed Mode: {ENABLE_DETAILED_MODE}")
+
+    # Startup Wait
+    logger.info(f"Waiting {INITIAL_WAIT} seconds before activating...")
+    time.sleep(INITIAL_WAIT)
+
+    if MANUAL_MODE:
+        logger.info("MANUAL MODE ACTIVE. Running silently.")
+        logger.info(f"Press '{HOTKEY_MCQ}' for MCQ search.")
+        logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' for Descriptive search.")
+
+        # Register Hotkeys
+        # We use a lambda to pass arguments
+        keyboard.add_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
+        keyboard.add_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
+
+        # Keep script alive
+        keyboard.wait()
+
+    else:
+        # AUTO MODE
+        iteration_count = 0
+        last_update_check = time.time()
+        
+        try:
+            while True:
+                # Periodic Update Check
+                if time.time() - last_update_check > UPDATE_CHECK_INTERVAL_SECONDS:
+                    logger.debug("Running periodic update check...")
+                    try:
+                        check_and_update() # Will exit/restart if update occurs
+                    except Exception as e:
+                        logger.error(f"Periodic update check failed: {e}")
+                    last_update_check = time.time()
+
+                iteration_count += 1
+                logger.debug(f"--- Iteration {iteration_count} ---")
+
+                action_taken, _ = process_screen_cycle(
+                    mode_hint=None, bypass_idempotency=False
+                )
+
+                if action_taken:
+                    time.sleep(POST_ACTION_WAIT)
+                else:
+                    time.sleep(POLL_INTERVAL)
+
+                if DEVELOPER_MODE and iteration_count >= DEV_MAX_ITERATIONS:
+                    logger.info("Dev limit reached.")
+                    break
+
+        except KeyboardInterrupt:
+            logger.info("Stopped by user.")
+        except Exception as e:
+            logger.critical(f"Error: {e}")
+            logger.debug(traceback.format_exc())
+
+
+if __name__ == "__main__":
+    main()

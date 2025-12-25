@@ -1,0 +1,110 @@
+# ==============================================================================
+# .gitignore - Scry
+# ==============================================================================
+
+# --- Runtime & Generated Content (CRITICAL) ---
+_runtime/
+logs/
+screenshots/
+debug/
+output/
+downloads/
+Scry_new.exe
+update_swap.bat
+tests/pages/
+*.exe
+*.pid
+*.zip
+*.rar
+*.7z
+
+# --- Environment & Secrets (CRITICAL) ---
+.env
+.env.local
+.env.*.local
+*.env
+# Exception: Always commit the example file
+!*.example
+!.env.example
+
+# --- Secure Installation (Machine-Bound Encryption) ---
+# This file contains the installation-specific ID used for API key encryption.
+# It must NOT be committed, as it ties encryption to this specific installation.
+.scry_installation
+
+# --- Licensing (Owner-Only Keys) ---
+# CRITICAL: The private key is your secret! Never commit it!
+# The license_signer.py contains the private key and should be moved out of the project
+scripts/keys/
+*_private.pem
+.scry_session_challenge
+# NOTE: license_signer.py should be MOVED OUT of the project after setup or IGNORED
+scripts/license_signer.py
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+venv/
+env/
+ENV/
+.venv/
+
+# --- Testing & Quality Assurance ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.known_hosts
+
+# --- IDE & Editor Configs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# --- OS Generated Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# --- Logs ---
+*.log
+
+# --- Spec Files (PyInstaller) ---
+# Only ignore if you don't want to track build specs, but usually good to track.
+# Un-comment if specs are auto-generated and unwanted.
+# *.spec
