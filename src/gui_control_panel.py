@@ -152,14 +152,21 @@ CONFIG_SCHEMA = {
             "type": "str",
             "default": "q",
             "desc": "MCQ Hotkey",
-            "tooltip": "Hotkey to trigger MCQ detection (single key)",
+            "tooltip": "Press this key 3 times consecutively to trigger MCQ detection (e.g., qqq)",
         },
         {
             "key": "HOTKEY_DESCRIPTIVE",
             "type": "str",
             "default": "z",
             "desc": "Descriptive Hotkey",
-            "tooltip": "Hotkey to trigger Descriptive question detection",
+            "tooltip": "Press this key 3 times consecutively to trigger Descriptive detection (e.g., zzz)",
+        },
+        {
+            "key": "HOTKEY_CLIPBOARD",
+            "type": "str",
+            "default": "c",
+            "desc": "Clipboard Stream Hotkey",
+            "tooltip": "Press 3x to stream clipboard content (Ctrl: Backspace=Pause, 9=Stop, →=Speed Up)",
         },
         {
             "key": "HOTKEY_DELAY",

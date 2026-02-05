@@ -34,6 +34,7 @@
 -   **🧠 AI-Powered**: Utilizes **Google Gemini (Flash Models)** for high-speed, accurate analysis
 -   **👁️ OCR Redundancy**: Hybrid approach using both AI Vision and Tesseract OCR
 -   **🎯 Automated Response**: Intelligent mouse movement and human-like typing simulation
+-   **📋 Clipboard Streaming**: Stream clipboard content character-by-character with customizable hotkey
 -   **🔐 Integrity Verification**: Built-in SHA256 integrity checks to prevent tampering
 
 ## 📋 Table of Contents
@@ -93,7 +94,12 @@ Set `DEVELOPER_MODE = True` in your `.env` file. Scry will run in the foreground
 All configuration is managed via environment variables (`.env` file).
 
 -   **Gemini API Key**: Stored with **machine-bound encryption** (see Security below).
--   **Hotkeys**: Configurable trigger keys for MCQ and descriptive modes.
+-   **Hotkeys**: Configurable trigger keys for MCQ, descriptive modes, and clipboard streaming.
+    - **Triple-Press Activation**: All hotkeys must be pressed **3 times consecutively** to trigger
+    - Any other key pressed between the 3 presses resets the count
+    - No time limit between presses (can be seconds or minutes apart)
+-   **Clipboard Streaming**: Press the clipboard hotkey 3x (default: `ccc`) to type out clipboard content character-by-character.
+    - **Controls during streaming**: `Backspace` = Pause/Resume, `9` = Stop, `→` = Speed Up
 -   **Behavior**: Toggle typing simulation, mouse speed, and logging levels.
 
 See `.env.example` for all available options.

@@ -24,6 +24,7 @@ from .config import (
     HOTKEY_DELAY,
     HOTKEY_DESCRIPTIVE,
     HOTKEY_MCQ,
+    HOTKEY_CLIPBOARD,
     INITIAL_WAIT,
     MANUAL_MODE,
     POLL_INTERVAL,
@@ -48,6 +49,81 @@ logger = get_logger("Main")
 
 # State Variables
 last_processed_question = None
+
+
+# =============================================================================
+# TRIPLE-PRESS HOTKEY TRACKER
+# =============================================================================
+class TriplePressTracker:
+    """
+    Tracks consecutive key presses and triggers actions only when
+    a key is pressed 3 times in succession.
+    
+    Rules:
+    - A key must be pressed 3 times consecutively to trigger its action
+    - If any other key is pressed between the 3 presses, the count resets
+    - There is NO time limit between presses (can be seconds, minutes, etc.)
+    - The count only resets when a DIFFERENT key is pressed
+    """
+    
+    def __init__(self):
+        self.last_key = None
+        self.press_count = 0
+        self.hotkey_actions = {}  # Maps key -> action function
+        self.registered_keys = set()  # Keys we're tracking
+    
+    def register_hotkey(self, key: str, action):
+        """
+        Register a hotkey with its associated action.
+        The action will only be triggered on 3 consecutive presses.
+        """
+        key_lower = key.lower()
+        self.hotkey_actions[key_lower] = action
+        self.registered_keys.add(key_lower)
+        logger.debug(f"Registered triple-press hotkey: '{key}' (press 3x to trigger)")
+    
+    def on_key_press(self, event):
+        """
+        Called on every key press. Tracks consecutive presses
+        and triggers action when count reaches 3.
+        """
+        key_name = event.name.lower() if hasattr(event, 'name') else str(event).lower()
+        
+        # Check if this is a registered hotkey
+        if key_name in self.registered_keys:
+            if key_name == self.last_key:
+                # Same key pressed again - increment count
+                self.press_count += 1
+                logger.debug(f"Hotkey '{key_name}' pressed {self.press_count}/3")
+                
+                if self.press_count >= 3:
+                    # Triple press achieved! Trigger the action
+                    logger.info(f"Triple-press detected for '{key_name}' - triggering action!")
+                    self.press_count = 0
+                    self.last_key = None
+                    
+                    # Execute the action
+                    action = self.hotkey_actions.get(key_name)
+                    if action:
+                        try:
+                            action()
+                        except Exception as e:
+                            logger.error(f"Error executing hotkey action: {e}")
+            else:
+                # Different registered key - start new count
+                self.last_key = key_name
+                self.press_count = 1
+                logger.debug(f"Hotkey '{key_name}' pressed 1/3")
+        else:
+            # Non-registered key pressed - reset tracking
+            if self.press_count > 0:
+                logger.debug(f"Non-hotkey '{key_name}' pressed - resetting count")
+            self.last_key = None
+            self.press_count = 0
+
+
+# Global tracker instance
+triple_press_tracker = TriplePressTracker()
 
 def create_pid_file():
     """Creates a PID file for the current process."""
@@ -223,6 +299,76 @@ def manual_trigger(mode_hint):
     logger.info("Returning to silent background mode...")
 
 
+def get_clipboard_content():
+    """
+    Get the current clipboard content.
+    Returns the text content or None if clipboard is empty or not text.
+    """
+    try:
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        try:
+            if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                return data
+            elif win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_TEXT):
+                data = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT)
+                return data.decode('utf-8', errors='ignore')
+        finally:
+            win32clipboard.CloseClipboard()
+    except ImportError:
+        # Fallback to pyperclip if win32clipboard not available
+        try:
+            import pyperclip
+            return pyperclip.paste()
+        except ImportError:
+            logger.error("Neither win32clipboard nor pyperclip available. Install pywin32 or pyperclip.")
+            return None
+    except Exception as e:
+        logger.error(f"Failed to read clipboard: {e}")
+        return None
+    return None
+
+
+def clipboard_stream_trigger():
+    """
+    Triggered when clipboard stream hotkey is pressed.
+    Reads the latest clipboard content and types it character by character.
+    Uses the same controls as the existing typing engine:
+    - Backspace: Pause/Resume
+    - 9: Emergency Stop
+    - Right Arrow: Speed Up
+    """
+    logger.info("CLIPBOARD STREAM TRIGGERED")
+    logger.info(f"Waiting {HOTKEY_DELAY}s before reading clipboard...")
+    time.sleep(HOTKEY_DELAY)
+    
+    # Get fresh clipboard content
+    clipboard_text = get_clipboard_content()
+    
+    if not clipboard_text:
+        logger.warning("Clipboard is empty or contains non-text content.")
+        return
+    
+    clipboard_text = clipboard_text.strip()
+    if not clipboard_text:
+        logger.warning("Clipboard contains only whitespace.")
+        return
+    
+    logger.info(f"Streaming clipboard content ({len(clipboard_text)} chars)...")
+    logger.info("Controls: Backspace=Pause, 9=Stop, Right Arrow=Speed Up")
+    
+    # Use the existing human-like typing engine
+    type_text_human_like(
+        clipboard_text,
+        min_wpm=TYPING_WPM_MIN,
+        max_wpm=TYPING_WPM_MAX
+    )
+    
+    logger.info("Clipboard stream complete.")
+    logger.info("Returning to silent background mode...")
+
+
 def main():
     if not DEVELOPER_MODE:
         pyautogui.FAILSAFE = False
@@ -275,13 +421,18 @@ def main():
 
     if MANUAL_MODE:
         logger.info("MANUAL MODE ACTIVE. Running silently.")
-        logger.info(f"Press '{HOTKEY_MCQ}' for MCQ search.")
-        logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' for Descriptive search.")
+        logger.info(f"Press '{HOTKEY_MCQ}' THREE TIMES for MCQ search.")
+        logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' THREE TIMES for Descriptive search.")
+        logger.info(f"Press '{HOTKEY_CLIPBOARD}' THREE TIMES for Clipboard Stream.")
+        logger.info("Note: Any other key press between the 3 presses will reset the count.")
 
-        # Register Hotkeys
-        # We use a lambda to pass arguments
-        keyboard.add_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
-        keyboard.add_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
+        # Register Triple-Press Hotkeys
+        triple_press_tracker.register_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
+        triple_press_tracker.register_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
+        triple_press_tracker.register_hotkey(HOTKEY_CLIPBOARD, clipboard_stream_trigger)
+        
+        # Set up global key listener to track all key presses
+        keyboard.on_press(triple_press_tracker.on_key_press)
 
         # Keep script alive
         keyboard.wait()

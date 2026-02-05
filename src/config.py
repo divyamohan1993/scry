@@ -301,6 +301,7 @@ DEV_SAVE_SCREENSHOTS = get_bool_env("DEV_SAVE_SCREENSHOTS", True) if not IS_FROZ
 MANUAL_MODE = get_bool_env("MANUAL_MODE", False)
 HOTKEY_MCQ = os.getenv("HOTKEY_MCQ", "q")
 HOTKEY_DESCRIPTIVE = os.getenv("HOTKEY_DESCRIPTIVE", "z")
+HOTKEY_CLIPBOARD = os.getenv("HOTKEY_CLIPBOARD", "c")
 HOTKEY_DELAY = get_float_env("HOTKEY_DELAY", 2.0)
 URGENT_MODE = get_bool_env("URGENT_MODE", False)
 

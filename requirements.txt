@@ -19,3 +19,5 @@ detect-secrets
 flask
 flask-cors
 cryptography
+pywin32
+pyperclip
