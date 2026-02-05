@@ -53,6 +53,9 @@ class SecureKeyManager:
             base_dir: The base directory of the project (where .env is located)
         """
         self.base_dir = os.path.abspath(base_dir)
+        # Normalize path on Windows to ensure consistent drive letter casing
+        if platform.system() == "Windows" and len(self.base_dir) >= 2 and self.base_dir[1] == ':':
+            self.base_dir = self.base_dir[0].upper() + self.base_dir[1:]
         self.installation_id_path = os.path.join(self.base_dir, self.INSTALLATION_ID_FILE)
         self._fernet = None
         self._key_valid = False
@@ -72,7 +75,7 @@ class SecureKeyManager:
         machine_id_parts.append(f"proc:{platform.processor()}")
         machine_id_parts.append(f"arch:{platform.machine()}")
         
-        # 4. Windows-specific: Get MachineGuid from registry
+        # 4. Windows-specific: Get MachineGuid from registry (most stable identifier)
         if platform.system() == "Windows":
             try:
                 import winreg
@@ -85,20 +88,8 @@ class SecureKeyManager:
             except Exception:
                 pass
             
-            # Also try to get disk serial
-            try:
-                result = subprocess.run(
-                    ["wmic", "diskdrive", "get", "serialnumber"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    serials = [s.strip() for s in result.stdout.split('\n') if s.strip() and s.strip() != "SerialNumber"]
-                    if serials:
-                        machine_id_parts.append(f"disk:{serials[0]}")
-            except Exception:
-                pass
+            # NOTE: Disk serial lookup removed - it's unreliable across restarts
+            # as wmic can return serials in different orders or formats
         
         # 5. Linux/Mac: Try to read machine-id
         elif platform.system() == "Linux":
