@@ -140,3 +140,129 @@ def get_gemini_response(
         except Exception as e2:
             logger.error(f"Fallback failed: {e2}")
             return None
+
+
+def get_gemini_response_multi_image(images: list, question_type_hint="MCQ"):
+    """
+    Sends multiple images to Gemini for analyzing long/scrolling MCQ questions.
+    The images should be in order from top to bottom of the scrollable content.
+    
+    Args:
+        images: List of PIL Image objects representing the scrolled pages
+        question_type_hint: Type of question (MCQ, MULTI_MCQ)
+    
+    Returns:
+        Same structure as get_gemini_response
+    """
+    if not images:
+        logger.error("No images provided for multi-image analysis")
+        return None
+    
+    num_images = len(images)
+    logger.info(f"Analyzing {num_images} screenshots for long question...")
+    
+    # Build the prompt for multi-image analysis
+    hint_instruction = (
+        f"IMPORTANT: You are analyzing a LONG QUESTION that spans {num_images} pages/screenshots. "
+        "The images are provided in order from TOP to BOTTOM of the scrollable content. "
+        "The FIRST image(s) contain the question text. "
+        "The LAST image contains the answer options (A, B, C, D, etc.). "
+        "You must analyze ALL images together to understand the complete question context "
+        "before identifying the correct answer from the options shown in the FINAL image."
+    )
+    
+    if question_type_hint == "MULTI_MCQ":
+        hint_instruction += (
+            "\nThis is a MULTI-SELECT question (checkboxes). "
+            "Identify ALL correct options."
+        )
+        output_format = (
+            "3. OUTPUT: Return PURE VALID JSON:\n"
+            "{\n"
+            '  "type": "MULTI_MCQ",\n'
+            '  "question": "Full question text from all images",\n'
+            '  "answers": [\n'
+            '    {\n'
+            '      "answer_text": "First correct answer text",\n'
+            '      "bbox": [ymin, xmin, ymax, xmax]\n'
+            '    },\n'
+            '    {\n'
+            '      "answer_text": "Second correct answer text",\n'
+            '      "bbox": [ymin, xmin, ymax, xmax]\n'
+            '    }\n'
+            '  ]\n'
+            "}\n"
+            "Note: bbox coordinates are relative to the LAST image (where options are visible).\n"
+            "Do not use markdown code blocks. Just valid JSON."
+        )
+    else:
+        output_format = (
+            "3. OUTPUT: Return PURE VALID JSON:\n"
+            "{\n"
+            '  "type": "MCQ",\n'
+            '  "question": "Full question text from all images",\n'
+            '  "answer_text": "Correct answer text (the option letter and text)",\n'
+            '  "bbox": [ymin, xmin, ymax, xmax] (0-1000, relative to the LAST image)\n'
+            "}\n"
+            "CRITICAL: The bbox must be the position of the correct answer in the LAST/FINAL image.\n"
+            "Do not use markdown code blocks. Just valid JSON."
+        )
+    
+    final_prompt = (
+        f"{hint_instruction}\n\n"
+        "1. READ: Carefully read ALL the provided images in sequence to understand the full question.\n"
+        "   - Images are ordered from top of page to bottom (as user scrolled down)\n"
+        "   - Combine the text from all images to form the complete question\n"
+        "\n"
+        "2. IDENTIFY OPTIONS: Look at the FINAL/LAST image for the answer options.\n"
+        "   - The options (A, B, C, D, etc.) will be visible in the last screenshot\n"
+        "   - These are the clickable options\n"
+        "\n"
+        "3. SOLVE: Based on the COMPLETE question context from all images, identify the correct answer.\n"
+        "\n"
+        f"{output_format}"
+    )
+    
+    try:
+        logger.debug(f"Sending {num_images} images to Gemini (Model: gemini-3-flash-preview)...")
+        
+        # Build content list: prompt first, then all images
+        contents = [final_prompt] + images
+        
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview", contents=contents
+        )
+        
+        raw_text = response.text.strip()
+        logger.debug(f"Gemini Raw Response: {raw_text}")
+        
+        # Clean up JSON if wrapped in markdown
+        cleaned_text = raw_text
+        if "```json" in cleaned_text:
+            cleaned_text = cleaned_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned_text:
+            cleaned_text = cleaned_text.split("```")[1].split("```")[0].strip()
+        
+        # Parse JSON
+        result = json.loads(cleaned_text)
+        logger.info(
+            f"Gemini Multi-Image Analysis: Question='{result.get('question', '')[:50]}...' | Answer='{result.get('answer_text', '')}'"
+        )
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error in multi-image Gemini request: {e}")
+        # Fallback to gemini-2.5-flash
+        try:
+            logger.info("Retrying multi-image with gemini-2.5-flash...")
+            contents = [final_prompt] + images
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", contents=contents
+            )
+            raw_text = response.text.strip()
+            if "```json" in raw_text:
+                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+            return json.loads(raw_text)
+        except Exception as e2:
+            logger.error(f"Multi-image fallback failed: {e2}")
+            return None

@@ -177,6 +177,13 @@ CONFIG_SCHEMA = {
             "tooltip": "Press 3x for multi-select checkbox questions (Manual mode only)",
         },
         {
+            "key": "HOTKEY_LONG_MCQ",
+            "type": "str",
+            "default": "l",
+            "desc": "Long MCQ Hotkey",
+            "tooltip": "Press 3x to capture multi-page questions (scrolls and captures screenshots)",
+        },
+        {
             "key": "HOTKEY_TOGGLE_MODE",
             "type": "str",
             "default": "t",

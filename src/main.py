@@ -37,7 +37,7 @@ from .runtime_config import (
     check_config_changes,
 )
 
-from .gemini import get_gemini_response
+from .gemini import get_gemini_response, get_gemini_response_multi_image
 from .logger import get_logger
 from .utils.desktop_manager import switch_to_input_desktop, type_text_human_like
 from .utils.mouse import click_at, move_away_from_options, simulate_reading_pause, reset_fatigue
@@ -82,11 +82,13 @@ def log_current_mode_info():
     """Log information about available hotkeys and current mode."""
     hotkey_mcq = get_config("HOTKEY_MCQ", "q")
     hotkey_multi_mcq = get_config("HOTKEY_MULTI_MCQ", "m")
+    hotkey_long_mcq = get_config("HOTKEY_LONG_MCQ", "l")
     hotkey_descriptive = get_config("HOTKEY_DESCRIPTIVE", "z")
     hotkey_clipboard = get_config("HOTKEY_CLIPBOARD", "c")
     hotkey_toggle = get_config("HOTKEY_TOGGLE_MODE", "t")
     
     logger.info(f"Press '{hotkey_mcq}' THREE TIMES for MCQ search.")
+    logger.info(f"Press '{hotkey_long_mcq}' THREE TIMES for Long/Scrolling MCQ.")
     if is_manual_mode:
         logger.info(f"Press '{hotkey_multi_mcq}' THREE TIMES for Multi-Select MCQ search.")
     logger.info(f"Press '{hotkey_descriptive}' THREE TIMES for Descriptive search.")
@@ -504,6 +506,141 @@ def clipboard_stream_trigger():
     logger.info("Returning to silent background mode...")
 
 
+def long_mcq_trigger():
+    """
+    Triggered when Long MCQ hotkey is pressed.
+    Handles questions that span multiple pages/screens and require scrolling.
+    
+    Flow:
+    1. Wait for user to position at the top of the question
+    2. Capture initial screenshot
+    3. Scroll down (Page Down) and capture more screenshots
+    4. Continue until options are detected or max pages reached
+    5. Send all screenshots to Gemini for analysis
+    6. Click the correct answer option
+    """
+    logger.info("LONG MCQ TRIGGERED - Multi-page question capture mode")
+    hotkey_delay = get_config("HOTKEY_DELAY", 2.0)
+    logger.info(f"Waiting {hotkey_delay}s before starting capture...")
+    logger.info("Ensure you're at the TOP of the question!")
+    time.sleep(hotkey_delay)
+    
+    # Configuration
+    MAX_PAGES = 10  # Maximum number of pages to scroll
+    SCROLL_DELAY = 0.8  # Delay after each scroll to let page settle
+    
+    # Ensure we are on the active desktop
+    if not switch_to_input_desktop():
+        logger.warning("Could not switch to input desktop.")
+    
+    screenshots = []
+    
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]
+        
+        for page_num in range(MAX_PAGES):
+            # Capture current screen
+            sct_img = sct.grab(monitor)
+            screenshot = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            screenshots.append(screenshot)
+            
+            logger.info(f"📸 Captured page {page_num + 1}/{MAX_PAGES}")
+            
+            # Save screenshot in developer mode
+            if DEVELOPER_MODE and DEV_SAVE_SCREENSHOTS:
+                timestamp = str(int(time.time() * 1000))
+                path = os.path.join(SCREENSHOTS_DIR, f"long_mcq_{timestamp}_page{page_num + 1}.png")
+                screenshot.save(path)
+            
+            # Check if this might be the last page (look for options pattern)
+            # We'll send to Gemini after we have at least 2 screenshots
+            # and ask it to check if options are visible
+            if page_num >= 1:
+                # Quick check: Ask Gemini if answer options are visible in the last screenshot
+                logger.debug("Checking if answer options are visible...")
+                try:
+                    quick_check = get_gemini_response(
+                        screenshot,
+                        enable_detailed_mode=False,
+                        question_type_hint="MCQ"
+                    )
+                    if quick_check and quick_check.get("type") == "MCQ" and quick_check.get("answer_text"):
+                        logger.info("✓ Answer options detected! Stopping scroll capture.")
+                        break
+                except Exception as e:
+                    logger.debug(f"Options check failed: {e}")
+            
+            # Scroll down for next page
+            logger.info("⬇️ Scrolling down...")
+            pyautogui.press('pagedown')
+            time.sleep(SCROLL_DELAY)
+    
+    if not screenshots:
+        logger.error("No screenshots captured!")
+        return
+    
+    logger.info(f"📚 Captured {len(screenshots)} pages total. Analyzing...")
+    
+    # Send all screenshots to Gemini for analysis
+    gemini_result = get_gemini_response_multi_image(screenshots, question_type_hint="MCQ")
+    
+    if not gemini_result:
+        logger.error("Failed to analyze multi-page question.")
+        return
+    
+    q_type = gemini_result.get("type", "SAFE")
+    answer_text = gemini_result.get("answer_text")
+    
+    if q_type == "SAFE" or not answer_text:
+        logger.warning("No actionable answer found in the multi-page question.")
+        return
+    
+    logger.info(f"ANSWER FOUND: '{answer_text[:50]}...'")
+    
+    # Get the last screenshot for coordinate calculation
+    last_screenshot = screenshots[-1]
+    
+    # Try to find the answer using text coordinates
+    coordinates = find_text_coordinates(last_screenshot, answer_text)
+    
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]
+        
+        if coordinates:
+            x, y = coordinates
+            final_x = x + monitor["left"]
+            final_y = y + monitor["top"]
+            
+            # Simulate human reading/thinking before clicking
+            simulate_reading_pause(0.5, 1.5)
+            
+            logger.info(f"🖱️ Clicking at ({final_x}, {final_y})")
+            click_at(final_x, final_y)
+            move_away_from_options()
+            logger.info("✓ Long MCQ completed successfully!")
+        else:
+            # Failsafe: use bounding box
+            bbox = gemini_result.get("bbox")
+            if bbox and len(bbox) == 4:
+                ymin, xmin, ymax, xmax = bbox
+                monitor_w, monitor_h = monitor["width"], monitor["height"]
+                
+                center_x = int(((xmin + xmax) / 2 / 1000) * monitor_w) + monitor["left"]
+                center_y = int(((ymin + ymax) / 2 / 1000) * monitor_h) + monitor["top"]
+                
+                # Simulate human reading/thinking before clicking
+                simulate_reading_pause(0.5, 1.5)
+                
+                logger.info(f"🖱️ FAILSAFE Click: ({center_x}, {center_y})")
+                click_at(center_x, center_y)
+                move_away_from_options()
+                logger.info("✓ Long MCQ completed (failsafe)!")
+            else:
+                logger.error("❌ Could not locate answer option on screen.")
+    
+    logger.info("Returning to silent background mode...")
+
+
 def register_all_hotkeys():
     """
     Register all hotkeys based on current configuration.
@@ -517,12 +654,14 @@ def register_all_hotkeys():
     hotkey_descriptive = get_config("HOTKEY_DESCRIPTIVE", "z")
     hotkey_clipboard = get_config("HOTKEY_CLIPBOARD", "c")
     hotkey_multi_mcq = get_config("HOTKEY_MULTI_MCQ", "m")
+    hotkey_long_mcq = get_config("HOTKEY_LONG_MCQ", "l")
     hotkey_toggle = get_config("HOTKEY_TOGGLE_MODE", "t")
     
-    # MCQ, Descriptive, Clipboard are always available
+    # MCQ, Descriptive, Clipboard, Long MCQ are always available
     triple_press_tracker.register_hotkey(hotkey_mcq, lambda: manual_trigger("MCQ"))
     triple_press_tracker.register_hotkey(hotkey_descriptive, lambda: manual_trigger("DESCRIPTIVE"))
     triple_press_tracker.register_hotkey(hotkey_clipboard, clipboard_stream_trigger)
+    triple_press_tracker.register_hotkey(hotkey_long_mcq, long_mcq_trigger)
     
     # Multi-Select MCQ - only works in MANUAL mode (handled in the trigger)
     def multi_mcq_trigger():

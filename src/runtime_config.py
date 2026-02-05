@@ -126,6 +126,7 @@ class RuntimeConfig:
         self._config["HOTKEY_DESCRIPTIVE"] = os.getenv("HOTKEY_DESCRIPTIVE", "z").lower()
         self._config["HOTKEY_CLIPBOARD"] = os.getenv("HOTKEY_CLIPBOARD", "c").lower()
         self._config["HOTKEY_MULTI_MCQ"] = os.getenv("HOTKEY_MULTI_MCQ", "m").lower()
+        self._config["HOTKEY_LONG_MCQ"] = os.getenv("HOTKEY_LONG_MCQ", "l").lower()
         self._config["HOTKEY_TOGGLE_MODE"] = os.getenv("HOTKEY_TOGGLE_MODE", "t").lower()
         self._config["HOTKEY_DELAY"] = self._get_float("HOTKEY_DELAY", 2.0)
         
