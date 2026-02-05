@@ -247,7 +247,12 @@ class HumanTypist:
     def type_text(self, text: str):
         """Types the given text with simulated human strategies."""
         self.stopped = False
-        self.speed_multiplier = 1.0  # Reset multiplier per session
+        self.paused = False
+        
+        # Always reset speed multiplier to default at the start of each session
+        # This ensures that previous acceleration (via right arrow) doesn't persist
+        self.speed_multiplier = 1.0
+        logger.info(f"HumanTypist: Starting new session (WPM: {self.base_min_wpm}-{self.base_max_wpm}, Speed: 1.0x)")
 
         if not text:
             return
