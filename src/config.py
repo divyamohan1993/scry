@@ -302,13 +302,14 @@ MANUAL_MODE = get_bool_env("MANUAL_MODE", False)
 HOTKEY_MCQ = os.getenv("HOTKEY_MCQ", "q")
 HOTKEY_DESCRIPTIVE = os.getenv("HOTKEY_DESCRIPTIVE", "z")
 HOTKEY_CLIPBOARD = os.getenv("HOTKEY_CLIPBOARD", "c")
+HOTKEY_MULTI_MCQ = os.getenv("HOTKEY_MULTI_MCQ", "m")
 HOTKEY_DELAY = get_float_env("HOTKEY_DELAY", 2.0)
 URGENT_MODE = get_bool_env("URGENT_MODE", False)
 
 # =============================================================================
 # UPDATE CONFIGURATION
 # =============================================================================
-GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER", "your-username")
+GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER", "divyamohan1993")
 GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME", "scry")
 # URL to check for the latest version file (raw content)
 VERSION_CHECK_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/main/src/version.py"

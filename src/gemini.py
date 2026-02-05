@@ -16,8 +16,9 @@ def get_gemini_response(
     """
     Sends image to Gemini and gets a structured JSON response.
     Returns keys:
-      - 'type': 'MCQ' or 'DESCRIPTIVE'
-      - 'answer_text': The answer (or null)
+      - 'type': 'MCQ', 'MULTI_MCQ', 'DESCRIPTIVE', or 'SAFE'
+      - 'answer_text': The answer (for MCQ or Descriptive, or null)
+      - 'answers': Array of {answer_text, bbox} (for MULTI_MCQ only)
       - 'bbox': [ymin, xmin, ymax, xmax] (0-1000) (For MCQ option to click)
       - 'marks': (int) for descriptive questions
     """
@@ -27,10 +28,51 @@ def get_gemini_response(
             "IMPORTANT: The user has manually flagged this as an MCQ. "
             "Focus on identifying options (A, B, C, D) and the correct choice."
         )
+    elif question_type_hint == "MULTI_MCQ":
+        hint_instruction = (
+            "IMPORTANT: The user has manually flagged this as a MULTI-SELECT MCQ "
+            "(multiple correct answers with checkboxes). "
+            "Identify ALL correct options. There may be 2 or more correct answers. "
+            "Return an array of answers with their bounding boxes."
+        )
     elif question_type_hint == "DESCRIPTIVE":
         hint_instruction = (
             "IMPORTANT: The user has manually flagged this as a DESCRIPTIVE question. "
             "Ignore radio buttons and generate a text answer based on the marks."
+        )
+
+    # Build output format based on question type
+    if question_type_hint == "MULTI_MCQ":
+        output_format = (
+            "3. OUTPUT: Return PURE VALID JSON:\n"
+            "{\n"
+            '  "type": "MULTI_MCQ",\n'
+            '  "question": "Question text",\n'
+            '  "answers": [\n'
+            '    {\n'
+            '      "answer_text": "First correct answer text",\n'
+            '      "bbox": [ymin, xmin, ymax, xmax]\n'
+            '    },\n'
+            '    {\n'
+            '      "answer_text": "Second correct answer text",\n'
+            '      "bbox": [ymin, xmin, ymax, xmax]\n'
+            '    }\n'
+            '  ]\n'
+            "}\n"
+            "Note: Include ALL correct answers in the 'answers' array.\n"
+            "Do not use markdown code blocks. Just valid JSON."
+        )
+    else:
+        output_format = (
+            "3. OUTPUT: Return PURE VALID JSON:\n"
+            "{\n"
+            '  "type": "MCQ" | "DESCRIPTIVE" | "SAFE",\n'
+            '  "question": "Question text",\n'
+            '  "answer_text": "Correct answer text (for MCQ or Descriptive)",\n'
+            '  "marks": int (or null),\n'
+            '  "bbox": [ymin, xmin, ymax, xmax] (For MCQ option OR Descriptive input field. 0-1000)\n'
+            "}\n"
+            "Do not use markdown code blocks. Just valid JSON."
         )
 
     # Enhanced prompt with Conditional Logic
@@ -38,12 +80,14 @@ def get_gemini_response(
         "Analyze the provided screen image. \n"
         f"{hint_instruction}\n"
         "1. CLASSIFY: Determine the Question Type.\n"
-        "   - 'MCQ': If there are radio buttons, checkboxes, or clear options (A, B, C, D).\n"
+        "   - 'MCQ': If there are radio buttons or clear single-select options (A, B, C, D).\n"
+        "   - 'MULTI_MCQ': If there are checkboxes or multi-select options (multiple correct answers).\n"
         "   - 'DESCRIPTIVE': If there is a text box or a question asking for an explanation/definition.\n"
         "   - 'SAFE': Login screens, desktops, errors, or no distinct question.\n"
         "\n"
         "2. SOLVE:\n"
         "   - IF MCQ: Identify the Correct Answer Option.\n"
+        "   - IF MULTI_MCQ: Identify ALL Correct Answer Options.\n"
         "   - IF DESCRIPTIVE: \n"
         f"        - ENABLED: {enable_detailed_mode}\n"
         "        - If ENABLED is true: Read the 'Marks' (e.g. 2 marks, 5 marks, 10 marks). Default to 5 if unknown.\n"
@@ -54,15 +98,7 @@ def get_gemini_response(
         "             - 20 Marks = Detailed explanation.\n"
         "        - If ENABLED is false: Return null for answer_text.\n"
         "\n"
-        "3. OUTPUT: Return PURE VALID JSON:\n"
-        "{\n"
-        '  "type": "MCQ" | "DESCRIPTIVE" | "SAFE",\n'
-        '  "question": "Question text",\n'
-        '  "answer_text": "Correct answer text (for MCQ or Descriptive)",\n'
-        '  "marks": int (or null),\n'
-        '  "bbox": [ymin, xmin, ymax, xmax] (For MCQ option OR Descriptive input field. 0-1000)\n'
-        "}\n"
-        "Do not use markdown code blocks. Just valid JSON."
+        f"{output_format}"
     )
 
     try:

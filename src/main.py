@@ -1,6 +1,7 @@
 import sys
 import time
 import traceback
+import random
 
 import mss
 import pyautogui
@@ -25,6 +26,7 @@ from .config import (
     HOTKEY_DESCRIPTIVE,
     HOTKEY_MCQ,
     HOTKEY_CLIPBOARD,
+    HOTKEY_MULTI_MCQ,
     INITIAL_WAIT,
     MANUAL_MODE,
     POLL_INTERVAL,
@@ -196,11 +198,24 @@ def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
         logger.info("Same question detected. Skipping.")
         return False, last_processed_question
 
-    if q_type == "SAFE" or not answer_text:
+    # For MULTI_MCQ, answers are in an array; for others, use answer_text
+    answers_list = gemini_result.get("answers", [])
+    
+    if q_type == "SAFE":
         logger.info(f"No actionable question detected ({q_type}).")
         return False, question_text
-
-    logger.info(f"QUESTION DETECTED ({q_type}). Target: '{answer_text[:50]}...'")
+    
+    # Check if we have any actionable answers
+    if q_type == "MULTI_MCQ":
+        if not answers_list:
+            logger.info("No answers found for MULTI_MCQ.")
+            return False, question_text
+        logger.info(f"QUESTION DETECTED ({q_type}). Found {len(answers_list)} correct answers.")
+    else:
+        if not answer_text:
+            logger.info(f"No actionable question detected ({q_type}).")
+            return False, question_text
+        logger.info(f"QUESTION DETECTED ({q_type}). Target: '{answer_text[:50]}...'")
     action_taken = False
 
     # Force type if hint provides it (Override Gemini classification if needed, or trust Gemini with hint)
@@ -242,6 +257,62 @@ def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
                 action_taken = True
             else:
                 logger.error("Failsafe Failed: No valid bbox.")
+
+    # --- MULTI_MCQ LOGIC (Multiple Correct Answers) ---
+    elif q_type == "MULTI_MCQ":
+        logger.info(f"Processing MULTI_MCQ with {len(answers_list)} answers...")
+        monitor_w, monitor_h = monitor["width"], monitor["height"]
+        
+        clicked_count = 0
+        for idx, answer_item in enumerate(answers_list):
+            ans_text = answer_item.get("answer_text", "")
+            ans_bbox = answer_item.get("bbox", [])
+            
+            logger.info(f"  [{idx + 1}/{len(answers_list)}] Target: '{ans_text[:40]}...'")
+            
+            # Try to find text coordinates first
+            coordinates = find_text_coordinates(screenshot, ans_text)
+            
+            if coordinates:
+                x, y = coordinates
+                final_x = x + monitor["left"]
+                final_y = y + monitor["top"]
+                
+                # Simulate human reading/thinking before clicking
+                simulate_reading_pause(0.3, 1.0)
+                
+                logger.info(f"  Clicking at ({final_x}, {final_y})")
+                click_at(final_x, final_y)
+                clicked_count += 1
+                
+                # Brief pause between clicks (human-like)
+                if idx < len(answers_list) - 1:
+                    time.sleep(random.uniform(0.4, 0.8))
+            elif ans_bbox and len(ans_bbox) == 4:
+                # Failsafe: use bounding box
+                ymin, xmin, ymax, xmax = ans_bbox
+                center_x = int(((xmin + xmax) / 2 / 1000) * monitor_w) + monitor["left"]
+                center_y = int(((ymin + ymax) / 2 / 1000) * monitor_h) + monitor["top"]
+                
+                # Simulate human reading/thinking before clicking
+                simulate_reading_pause(0.3, 1.0)
+                
+                logger.info(f"  FAILSAFE Click: ({center_x}, {center_y})")
+                click_at(center_x, center_y)
+                clicked_count += 1
+                
+                # Brief pause between clicks (human-like)
+                if idx < len(answers_list) - 1:
+                    time.sleep(random.uniform(0.4, 0.8))
+            else:
+                logger.warning(f"  Could not locate answer: '{ans_text[:30]}...'")
+        
+        if clicked_count > 0:
+            move_away_from_options()  # Move mouse away after all selections
+            action_taken = True
+            logger.info(f"MULTI_MCQ: Successfully clicked {clicked_count}/{len(answers_list)} answers.")
+        else:
+            logger.error("MULTI_MCQ: Failed to click any answers.")
 
     # --- DESCRIPTIVE LOGIC ---
     elif q_type == "DESCRIPTIVE" and ENABLE_DETAILED_MODE:
@@ -422,12 +493,14 @@ def main():
     if MANUAL_MODE:
         logger.info("MANUAL MODE ACTIVE. Running silently.")
         logger.info(f"Press '{HOTKEY_MCQ}' THREE TIMES for MCQ search.")
+        logger.info(f"Press '{HOTKEY_MULTI_MCQ}' THREE TIMES for Multi-Select MCQ search.")
         logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' THREE TIMES for Descriptive search.")
         logger.info(f"Press '{HOTKEY_CLIPBOARD}' THREE TIMES for Clipboard Stream.")
         logger.info("Note: Any other key press between the 3 presses will reset the count.")
 
         # Register Triple-Press Hotkeys
         triple_press_tracker.register_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
+        triple_press_tracker.register_hotkey(HOTKEY_MULTI_MCQ, lambda: manual_trigger("MULTI_MCQ"))
         triple_press_tracker.register_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
         triple_press_tracker.register_hotkey(HOTKEY_CLIPBOARD, clipboard_stream_trigger)
         
