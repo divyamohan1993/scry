@@ -17,29 +17,26 @@ except ImportError:
 
 import os
 import atexit
+
+# Import static config values (paths, API key, etc.)
 from .config import (
     DEV_MAX_ITERATIONS,
     DEV_SAVE_SCREENSHOTS,
     DEVELOPER_MODE,
-    ENABLE_DETAILED_MODE,
-    HOTKEY_DELAY,
-    HOTKEY_DESCRIPTIVE,
-    HOTKEY_MCQ,
-    HOTKEY_CLIPBOARD,
-    HOTKEY_MULTI_MCQ,
-    HOTKEY_TOGGLE_MODE,
-    INITIAL_WAIT,
-    MANUAL_MODE,
-    POLL_INTERVAL,
-    POST_ACTION_WAIT,
     SCREENSHOTS_DIR,
     RUNTIME_DIR,
-    TYPING_WPM_MAX,
-    TYPING_WPM_MIN,
-    UPDATE_CHECK_INTERVAL_SECONDS,
     REQUIRE_LICENSE,
     validate_license,
 )
+
+# Import runtime config for dynamic settings
+from .runtime_config import (
+    runtime_config,
+    get_config,
+    reload_config,
+    check_config_changes,
+)
+
 from .gemini import get_gemini_response
 from .logger import get_logger
 from .utils.desktop_manager import switch_to_input_desktop, type_text_human_like
@@ -58,7 +55,7 @@ last_processed_question = None
 # =============================================================================
 # This is the runtime state that can be changed while the app is running
 # It starts with the value from config but can be toggled via hotkey
-is_manual_mode = MANUAL_MODE
+is_manual_mode = get_config("MANUAL_MODE", False)
 
 
 def toggle_mode():
@@ -83,12 +80,18 @@ def toggle_mode():
 
 def log_current_mode_info():
     """Log information about available hotkeys and current mode."""
-    logger.info(f"Press '{HOTKEY_MCQ}' THREE TIMES for MCQ search.")
+    hotkey_mcq = get_config("HOTKEY_MCQ", "q")
+    hotkey_multi_mcq = get_config("HOTKEY_MULTI_MCQ", "m")
+    hotkey_descriptive = get_config("HOTKEY_DESCRIPTIVE", "z")
+    hotkey_clipboard = get_config("HOTKEY_CLIPBOARD", "c")
+    hotkey_toggle = get_config("HOTKEY_TOGGLE_MODE", "t")
+    
+    logger.info(f"Press '{hotkey_mcq}' THREE TIMES for MCQ search.")
     if is_manual_mode:
-        logger.info(f"Press '{HOTKEY_MULTI_MCQ}' THREE TIMES for Multi-Select MCQ search.")
-    logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' THREE TIMES for Descriptive search.")
-    logger.info(f"Press '{HOTKEY_CLIPBOARD}' THREE TIMES for Clipboard Stream.")
-    logger.info(f"Press '{HOTKEY_TOGGLE_MODE}' THREE TIMES to toggle MANUAL/AUTO mode.")
+        logger.info(f"Press '{hotkey_multi_mcq}' THREE TIMES for Multi-Select MCQ search.")
+    logger.info(f"Press '{hotkey_descriptive}' THREE TIMES for Descriptive search.")
+    logger.info(f"Press '{hotkey_clipboard}' THREE TIMES for Clipboard Stream.")
+    logger.info(f"Press '{hotkey_toggle}' THREE TIMES to toggle MANUAL/AUTO mode.")
     logger.info("Note: Any other key press between the 3 presses will reset the count.")
 
 
@@ -105,6 +108,8 @@ class TriplePressTracker:
     - If any other key is pressed between the 3 presses, the count resets
     - There is NO time limit between presses (can be seconds, minutes, etc.)
     - The count only resets when a DIFFERENT key is pressed
+    
+    Supports dynamic hotkey updates via unregister/clear methods.
     """
     
     def __init__(self):
@@ -122,6 +127,22 @@ class TriplePressTracker:
         self.hotkey_actions[key_lower] = action
         self.registered_keys.add(key_lower)
         logger.debug(f"Registered triple-press hotkey: '{key}' (press 3x to trigger)")
+    
+    def unregister_hotkey(self, key: str):
+        """Unregister a hotkey."""
+        key_lower = key.lower()
+        if key_lower in self.hotkey_actions:
+            del self.hotkey_actions[key_lower]
+        self.registered_keys.discard(key_lower)
+        logger.debug(f"Unregistered hotkey: '{key}'")
+    
+    def clear_all(self):
+        """Clear all registered hotkeys for reconfiguration."""
+        self.hotkey_actions.clear()
+        self.registered_keys.clear()
+        self.last_key = None
+        self.press_count = 0
+        logger.debug("Cleared all registered hotkeys")
     
     def on_key_press(self, event):
         """
@@ -216,7 +237,7 @@ def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
     logger.debug(f"Analyzing screen (Hint: {mode_hint})...")
     gemini_result = get_gemini_response(
         screenshot,
-        enable_detailed_mode=ENABLE_DETAILED_MODE,
+        enable_detailed_mode=get_config("ENABLE_DETAILED_MODE", True),
         question_type_hint=mode_hint,
     )
 
@@ -354,7 +375,7 @@ def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
             logger.error("MULTI_MCQ: Failed to click any answers.")
 
     # --- DESCRIPTIVE LOGIC ---
-    elif q_type == "DESCRIPTIVE" and ENABLE_DETAILED_MODE:
+    elif q_type == "DESCRIPTIVE" and get_config("ENABLE_DETAILED_MODE", True):
         if "bbox" in gemini_result and gemini_result["bbox"]:
             logger.info("Clicking text area to focus...")
             bbox = gemini_result["bbox"]
@@ -381,7 +402,9 @@ def process_screen_cycle(mode_hint=None, bypass_idempotency=False):
                     time.sleep(0.5)
 
         type_text_human_like(
-            answer_text, min_wpm=TYPING_WPM_MIN, max_wpm=TYPING_WPM_MAX
+            answer_text,
+            min_wpm=get_config("TYPING_WPM_MIN", 30),
+            max_wpm=get_config("TYPING_WPM_MAX", 100)
         )
         action_taken = True
 
@@ -396,8 +419,9 @@ def manual_trigger(mode_hint):
     Blocking function called when hotkey is pressed.
     """
     logger.info(f"MANUAL TRIGGER DETECTED: {mode_hint}")
-    logger.info(f"Waiting {HOTKEY_DELAY}s before capture...")
-    time.sleep(HOTKEY_DELAY)
+    hotkey_delay = get_config("HOTKEY_DELAY", 2.0)
+    logger.info(f"Waiting {hotkey_delay}s before capture...")
+    time.sleep(hotkey_delay)
 
     action, _ = process_screen_cycle(mode_hint=mode_hint, bypass_idempotency=True)
 
@@ -450,8 +474,9 @@ def clipboard_stream_trigger():
     - Right Arrow: Speed Up
     """
     logger.info("CLIPBOARD STREAM TRIGGERED")
-    logger.info(f"Waiting {HOTKEY_DELAY}s before reading clipboard...")
-    time.sleep(HOTKEY_DELAY)
+    hotkey_delay = get_config("HOTKEY_DELAY", 2.0)
+    logger.info(f"Waiting {hotkey_delay}s before reading clipboard...")
+    time.sleep(hotkey_delay)
     
     # Get fresh clipboard content
     clipboard_text = get_clipboard_content()
@@ -471,12 +496,78 @@ def clipboard_stream_trigger():
     # Use the existing human-like typing engine
     type_text_human_like(
         clipboard_text,
-        min_wpm=TYPING_WPM_MIN,
-        max_wpm=TYPING_WPM_MAX
+        min_wpm=get_config("TYPING_WPM_MIN", 30),
+        max_wpm=get_config("TYPING_WPM_MAX", 100)
     )
     
     logger.info("Clipboard stream complete.")
     logger.info("Returning to silent background mode...")
+
+
+def register_all_hotkeys():
+    """
+    Register all hotkeys based on current configuration.
+    Called on startup and whenever config changes.
+    """
+    # Clear existing registrations
+    triple_press_tracker.clear_all()
+    
+    # Get current hotkey config
+    hotkey_mcq = get_config("HOTKEY_MCQ", "q")
+    hotkey_descriptive = get_config("HOTKEY_DESCRIPTIVE", "z")
+    hotkey_clipboard = get_config("HOTKEY_CLIPBOARD", "c")
+    hotkey_multi_mcq = get_config("HOTKEY_MULTI_MCQ", "m")
+    hotkey_toggle = get_config("HOTKEY_TOGGLE_MODE", "t")
+    
+    # MCQ, Descriptive, Clipboard are always available
+    triple_press_tracker.register_hotkey(hotkey_mcq, lambda: manual_trigger("MCQ"))
+    triple_press_tracker.register_hotkey(hotkey_descriptive, lambda: manual_trigger("DESCRIPTIVE"))
+    triple_press_tracker.register_hotkey(hotkey_clipboard, clipboard_stream_trigger)
+    
+    # Multi-Select MCQ - only works in MANUAL mode (handled in the trigger)
+    def multi_mcq_trigger():
+        """Wrapper that only allows MULTI_MCQ in manual mode."""
+        if is_manual_mode:
+            manual_trigger("MULTI_MCQ")
+        else:
+            logger.warning("Multi-Select MCQ is only available in MANUAL mode.")
+            toggle_key = get_config("HOTKEY_TOGGLE_MODE", "t")
+            logger.info(f"Press '{toggle_key}' 3x to switch to MANUAL mode first.")
+    
+    triple_press_tracker.register_hotkey(hotkey_multi_mcq, multi_mcq_trigger)
+    
+    # Mode toggle hotkey
+    triple_press_tracker.register_hotkey(hotkey_toggle, toggle_mode)
+    
+    logger.info("Hotkeys registered successfully.")
+
+
+def check_config_reload_signal():
+    """
+    Check if the GUI has sent a config reload signal.
+    Returns True if signal was found and config was reloaded.
+    """
+    signal_file = os.path.join(RUNTIME_DIR, "reload_config.signal")
+    
+    if os.path.exists(signal_file):
+        try:
+            # Remove the signal file
+            os.remove(signal_file)
+            
+            # Reload the configuration
+            reload_config()
+            
+            # Re-register hotkeys with new config
+            register_all_hotkeys()
+            
+            logger.info("🔄 Configuration reloaded from GUI!")
+            log_current_mode_info()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reload config: {e}")
+    
+    return False
 
 
 def main():
@@ -523,33 +614,17 @@ def main():
     reset_fatigue()
 
     logger.info(f"Starting Mode: {'MANUAL (Hotkeys Only)' if is_manual_mode else 'AUTO (Loop)'}")
-    logger.info(f"Detailed Mode: {ENABLE_DETAILED_MODE}")
+    logger.info(f"Detailed Mode: {get_config('ENABLE_DETAILED_MODE', True)}")
 
     # Startup Wait
-    logger.info(f"Waiting {INITIAL_WAIT} seconds before activating...")
-    time.sleep(INITIAL_WAIT)
+    initial_wait = get_config("INITIAL_WAIT", 10)
+    logger.info(f"Waiting {initial_wait} seconds before activating...")
+    time.sleep(initial_wait)
 
     # ==========================================================================
     # REGISTER ALL HOTKEYS (always active regardless of mode)
     # ==========================================================================
-    # MCQ, Descriptive, Clipboard are always available
-    triple_press_tracker.register_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
-    triple_press_tracker.register_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
-    triple_press_tracker.register_hotkey(HOTKEY_CLIPBOARD, clipboard_stream_trigger)
-    
-    # Multi-Select MCQ - only works in MANUAL mode (handled in the trigger)
-    def multi_mcq_trigger():
-        """Wrapper that only allows MULTI_MCQ in manual mode."""
-        if is_manual_mode:
-            manual_trigger("MULTI_MCQ")
-        else:
-            logger.warning("Multi-Select MCQ is only available in MANUAL mode.")
-            logger.info(f"Press '{HOTKEY_TOGGLE_MODE}' 3x to switch to MANUAL mode first.")
-    
-    triple_press_tracker.register_hotkey(HOTKEY_MULTI_MCQ, multi_mcq_trigger)
-    
-    # Mode toggle hotkey
-    triple_press_tracker.register_hotkey(HOTKEY_TOGGLE_MODE, toggle_mode)
+    register_all_hotkeys()
     
     # Set up global key listener (always active)
     keyboard.on_press(triple_press_tracker.on_key_press)
@@ -560,11 +635,15 @@ def main():
     log_current_mode_info()
 
     # ==========================================================================
-    # UNIFIED MAIN LOOP (supports dynamic mode switching)
+    # UNIFIED MAIN LOOP (supports dynamic mode switching and config reload)
     # ==========================================================================
     iteration_count = 0
     last_update_check = time.time()
+    last_config_check = time.time()
     last_mode = is_manual_mode  # Track mode changes
+    
+    # Config check interval (check every 2 seconds for config changes)
+    CONFIG_CHECK_INTERVAL = 2.0
     
     try:
         while True:
@@ -573,8 +652,14 @@ def main():
                 last_mode = is_manual_mode
                 # Mode was just switched, info already logged by toggle_mode()
             
+            # Check for config reload signal from GUI (every 2 seconds)
+            if time.time() - last_config_check > CONFIG_CHECK_INTERVAL:
+                check_config_reload_signal()
+                last_config_check = time.time()
+            
             # Periodic Update Check (in both modes)
-            if time.time() - last_update_check > UPDATE_CHECK_INTERVAL_SECONDS:
+            update_interval = get_config("UPDATE_CHECK_INTERVAL_SECONDS", 300)
+            if time.time() - last_update_check > update_interval:
                 logger.debug("Running periodic update check...")
                 try:
                     check_and_update()  # Will exit/restart if update occurs
@@ -597,9 +682,11 @@ def main():
                 )
 
                 if action_taken:
-                    time.sleep(POST_ACTION_WAIT)
+                    post_action_wait = get_config("POST_ACTION_WAIT", 10)
+                    time.sleep(post_action_wait)
                 else:
-                    time.sleep(POLL_INTERVAL)
+                    poll_interval = get_config("POLL_INTERVAL", 3)
+                    time.sleep(poll_interval)
 
                 if DEVELOPER_MODE and iteration_count >= DEV_MAX_ITERATIONS:
                     logger.info("Dev limit reached.")

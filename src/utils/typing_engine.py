@@ -7,7 +7,7 @@ import os
 
 import keyboard
 
-from src.config import URGENT_MODE
+from src.runtime_config import get_config
 
 # Setup logger
 logger = logging.getLogger("TypingEngine")
@@ -189,7 +189,8 @@ class HumanTypist:
         self.base_max_wpm = max_wpm
 
         # Urgent mode override - maximum speed, no delays
-        self.urgent_mode = URGENT_MODE
+        # Read dynamically on each init to support runtime changes
+        self.urgent_mode = get_config("URGENT_MODE", False)
         if self.urgent_mode:
             logger.info("HumanTypist: 'URGENT_MODE' active! Typing at MAXIMUM SPEED (no WPM cap).")
             self.error_rate = 0.0  # No errors in urgent mode

@@ -7,6 +7,7 @@ Features auto-save, toggle switches, and intuitive controls.
 import os
 import sys
 import re
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox, font
 from pathlib import Path
@@ -139,7 +140,7 @@ CONFIG_SCHEMA = {
             "tooltip": "Reduces delays for time-critical situations, faster typing",
         },
     ],
-    "Input Modes": [
+    "Trigger Hotkeys": [
         {
             "key": "MANUAL_MODE",
             "type": "bool",
@@ -166,7 +167,21 @@ CONFIG_SCHEMA = {
             "type": "str",
             "default": "c",
             "desc": "Clipboard Stream Hotkey",
-            "tooltip": "Press 3x to stream clipboard content (Ctrl: Backspace=Pause, 9=Stop, →=Speed Up)",
+            "tooltip": "Press 3x to stream clipboard content",
+        },
+        {
+            "key": "HOTKEY_MULTI_MCQ",
+            "type": "str",
+            "default": "m",
+            "desc": "Multi-Select MCQ Hotkey",
+            "tooltip": "Press 3x for multi-select checkbox questions (Manual mode only)",
+        },
+        {
+            "key": "HOTKEY_TOGGLE_MODE",
+            "type": "str",
+            "default": "t",
+            "desc": "Toggle Mode Hotkey",
+            "tooltip": "Press 3x to switch between Manual and Auto mode",
         },
         {
             "key": "HOTKEY_DELAY",
@@ -175,9 +190,13 @@ CONFIG_SCHEMA = {
             "min": 0.5,
             "max": 10.0,
             "step": 0.5,
-            "desc": "Hotkey Delay",
-            "tooltip": "Delay in seconds after hotkey press before screen capture",
+            "desc": "Hotkey Delay (seconds)",
+            "tooltip": "Delay after hotkey press before capturing screen",
         },
+    ],
+    "Writing Panel Controls (Fixed)": [
+        # This is an informational section - these keys are NOT configurable
+        # They are hardcoded for reliability during text streaming
     ],
     "Developer Options": [
         {
@@ -733,6 +752,22 @@ class ControlPanelApp:
         )
         open_btn.pack(side="left", padx=8, pady=12)
         
+        # Apply to Running Instance button
+        apply_btn = tk.Button(
+            button_bar,
+            text="⚡ Apply Now",
+            bg=Theme.SUCCESS,
+            fg="#000000",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padx=16,
+            pady=8,
+            command=self._apply_to_running_instance,
+            activebackground=Theme.ACCENT,
+            activeforeground="white",
+        )
+        apply_btn.pack(side="left", padx=8, pady=12)
+        
         # Reset defaults button
         reset_btn = tk.Button(
             button_bar,
@@ -759,6 +794,11 @@ class ControlPanelApp:
         card = tk.Frame(self.content_frame, bg=Theme.BG_CARD, padx=16, pady=12)
         card.pack(fill="x", padx=16, pady=(0, 8))
         
+        # Special handling for the informational section
+        if section_name == "Writing Panel Controls (Fixed)":
+            self._create_fixed_controls_info(card)
+            return
+        
         for i, var_config in enumerate(variables):
             if i > 0:
                 # Separator between items
@@ -766,6 +806,73 @@ class ControlPanelApp:
                 sep.pack(fill="x", pady=12)
             
             self._create_control(card, var_config)
+    
+    def _create_fixed_controls_info(self, parent: tk.Frame):
+        """Create informational display for fixed writing panel controls."""
+        info_frame = tk.Frame(parent, bg=Theme.BG_CARD)
+        info_frame.pack(fill="x", pady=4)
+        
+        # Info label
+        info_label = tk.Label(
+            info_frame,
+            text="These controls are active during text streaming and cannot be changed:",
+            bg=Theme.BG_CARD,
+            fg=Theme.TEXT_SECONDARY,
+            font=("Segoe UI", 10, "italic"),
+            wraplength=550,
+        )
+        info_label.pack(anchor="w", pady=(0, 12))
+        
+        # Fixed controls definition
+        fixed_controls = [
+            ("Backspace", "Pause / Resume typing", "🔄"),
+            ("9", "Emergency Stop (cancels typing)", "🛑"),
+            ("→ (Right Arrow)", "Speed Up typing by 10%", "⚡"),
+        ]
+        
+        for key, desc, icon in fixed_controls:
+            row = tk.Frame(info_frame, bg=Theme.BG_LIGHT, padx=12, pady=8)
+            row.pack(fill="x", pady=2)
+            
+            icon_label = tk.Label(
+                row,
+                text=icon,
+                bg=Theme.BG_LIGHT,
+                fg=Theme.TEXT_PRIMARY,
+                font=("Segoe UI", 12),
+            )
+            icon_label.pack(side="left", padx=(0, 8))
+            
+            key_label = tk.Label(
+                row,
+                text=key,
+                bg=Theme.BG_LIGHT,
+                fg=Theme.ACCENT,
+                font=("Segoe UI", 11, "bold"),
+                width=15,
+                anchor="w",
+            )
+            key_label.pack(side="left")
+            
+            desc_label = tk.Label(
+                row,
+                text=desc,
+                bg=Theme.BG_LIGHT,
+                fg=Theme.TEXT_SECONDARY,
+                font=("Segoe UI", 10),
+            )
+            desc_label.pack(side="left", padx=(8, 0))
+        
+        # Note about why these are fixed
+        note_label = tk.Label(
+            info_frame,
+            text="ℹ️ These keys remain fixed to ensure reliable control during typing sessions.",
+            bg=Theme.BG_CARD,
+            fg=Theme.TEXT_MUTED,
+            font=("Segoe UI", 9),
+            wraplength=550,
+        )
+        note_label.pack(anchor="w", pady=(12, 0))
     
     def _create_control(self, parent: tk.Frame, config: dict):
         """Create appropriate control widget based on variable type"""
@@ -982,6 +1089,41 @@ class ControlPanelApp:
             self._save_value("GEMINI_API_KEY")
         
         self.status_bar.set_status("Reset to defaults complete", Theme.SUCCESS)
+    
+    def _apply_to_running_instance(self):
+        """Signal the running Scry instance to reload its configuration."""
+        try:
+            # Check if app is running via PID file
+            runtime_dir = PROJECT_ROOT / "_runtime"
+            pid_file = runtime_dir / "app.pid"
+            
+            if not pid_file.exists():
+                messagebox.showinfo(
+                    "No Running Instance",
+                    "Scry is not currently running.\n\n"
+                    "Your settings have been saved and will apply\n"
+                    "the next time you start Scry."
+                )
+                return
+            
+            # Create a reload signal file
+            signal_file = runtime_dir / "reload_config.signal"
+            with open(signal_file, "w") as f:
+                f.write(str(time.time()))
+            
+            self.status_bar.set_status("Config reload signal sent!", Theme.SUCCESS)
+            
+            # Also show a confirmation
+            messagebox.showinfo(
+                "Settings Applied",
+                "Configuration reload signal sent!\n\n"
+                "The running Scry instance will apply\n"
+                "your new settings within a few seconds."
+            )
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not signal running instance: {e}")
+            self.status_bar.set_status(f"Error: {e}", Theme.ERROR)
 
 
 def main():
