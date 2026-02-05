@@ -27,6 +27,7 @@ from .config import (
     HOTKEY_MCQ,
     HOTKEY_CLIPBOARD,
     HOTKEY_MULTI_MCQ,
+    HOTKEY_TOGGLE_MODE,
     INITIAL_WAIT,
     MANUAL_MODE,
     POLL_INTERVAL,
@@ -51,6 +52,44 @@ logger = get_logger("Main")
 
 # State Variables
 last_processed_question = None
+
+# =============================================================================
+# RUNTIME MODE STATE (can be toggled at runtime)
+# =============================================================================
+# This is the runtime state that can be changed while the app is running
+# It starts with the value from config but can be toggled via hotkey
+is_manual_mode = MANUAL_MODE
+
+
+def toggle_mode():
+    """
+    Toggle between MANUAL and AUTO modes at runtime.
+    Called when the mode toggle hotkey is pressed.
+    """
+    global is_manual_mode
+    is_manual_mode = not is_manual_mode
+    
+    mode_name = "MANUAL (Hotkeys Only)" if is_manual_mode else "AUTO (Loop)"
+    logger.info(f"MODE SWITCHED to: {mode_name}")
+    
+    if is_manual_mode:
+        logger.info("Now in MANUAL MODE - Only hotkey triggers will work.")
+        logger.info("Multi-Select MCQ is available in MANUAL mode only.")
+    else:
+        logger.info("Now in AUTO MODE - Screen polling active.")
+        logger.info("MCQ and Descriptive questions will be auto-detected.")
+        logger.info("Note: Multi-Select MCQ is NOT available in AUTO mode.")
+
+
+def log_current_mode_info():
+    """Log information about available hotkeys and current mode."""
+    logger.info(f"Press '{HOTKEY_MCQ}' THREE TIMES for MCQ search.")
+    if is_manual_mode:
+        logger.info(f"Press '{HOTKEY_MULTI_MCQ}' THREE TIMES for Multi-Select MCQ search.")
+    logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' THREE TIMES for Descriptive search.")
+    logger.info(f"Press '{HOTKEY_CLIPBOARD}' THREE TIMES for Clipboard Stream.")
+    logger.info(f"Press '{HOTKEY_TOGGLE_MODE}' THREE TIMES to toggle MANUAL/AUTO mode.")
+    logger.info("Note: Any other key press between the 3 presses will reset the count.")
 
 
 # =============================================================================
@@ -483,52 +522,76 @@ def main():
     # Reset mouse fatigue counter for fresh session
     reset_fatigue()
 
-    logger.info(f"Mode: {'MANUAL (Hotkeys Only)' if MANUAL_MODE else 'AUTO (Loop)'}")
+    logger.info(f"Starting Mode: {'MANUAL (Hotkeys Only)' if is_manual_mode else 'AUTO (Loop)'}")
     logger.info(f"Detailed Mode: {ENABLE_DETAILED_MODE}")
 
     # Startup Wait
     logger.info(f"Waiting {INITIAL_WAIT} seconds before activating...")
     time.sleep(INITIAL_WAIT)
 
-    if MANUAL_MODE:
-        logger.info("MANUAL MODE ACTIVE. Running silently.")
-        logger.info(f"Press '{HOTKEY_MCQ}' THREE TIMES for MCQ search.")
-        logger.info(f"Press '{HOTKEY_MULTI_MCQ}' THREE TIMES for Multi-Select MCQ search.")
-        logger.info(f"Press '{HOTKEY_DESCRIPTIVE}' THREE TIMES for Descriptive search.")
-        logger.info(f"Press '{HOTKEY_CLIPBOARD}' THREE TIMES for Clipboard Stream.")
-        logger.info("Note: Any other key press between the 3 presses will reset the count.")
+    # ==========================================================================
+    # REGISTER ALL HOTKEYS (always active regardless of mode)
+    # ==========================================================================
+    # MCQ, Descriptive, Clipboard are always available
+    triple_press_tracker.register_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
+    triple_press_tracker.register_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
+    triple_press_tracker.register_hotkey(HOTKEY_CLIPBOARD, clipboard_stream_trigger)
+    
+    # Multi-Select MCQ - only works in MANUAL mode (handled in the trigger)
+    def multi_mcq_trigger():
+        """Wrapper that only allows MULTI_MCQ in manual mode."""
+        if is_manual_mode:
+            manual_trigger("MULTI_MCQ")
+        else:
+            logger.warning("Multi-Select MCQ is only available in MANUAL mode.")
+            logger.info(f"Press '{HOTKEY_TOGGLE_MODE}' 3x to switch to MANUAL mode first.")
+    
+    triple_press_tracker.register_hotkey(HOTKEY_MULTI_MCQ, multi_mcq_trigger)
+    
+    # Mode toggle hotkey
+    triple_press_tracker.register_hotkey(HOTKEY_TOGGLE_MODE, toggle_mode)
+    
+    # Set up global key listener (always active)
+    keyboard.on_press(triple_press_tracker.on_key_press)
+    
+    # Log initial mode info
+    mode_name = "MANUAL MODE" if is_manual_mode else "AUTO MODE"
+    logger.info(f"{mode_name} ACTIVE.")
+    log_current_mode_info()
 
-        # Register Triple-Press Hotkeys
-        triple_press_tracker.register_hotkey(HOTKEY_MCQ, lambda: manual_trigger("MCQ"))
-        triple_press_tracker.register_hotkey(HOTKEY_MULTI_MCQ, lambda: manual_trigger("MULTI_MCQ"))
-        triple_press_tracker.register_hotkey(HOTKEY_DESCRIPTIVE, lambda: manual_trigger("DESCRIPTIVE"))
-        triple_press_tracker.register_hotkey(HOTKEY_CLIPBOARD, clipboard_stream_trigger)
-        
-        # Set up global key listener to track all key presses
-        keyboard.on_press(triple_press_tracker.on_key_press)
+    # ==========================================================================
+    # UNIFIED MAIN LOOP (supports dynamic mode switching)
+    # ==========================================================================
+    iteration_count = 0
+    last_update_check = time.time()
+    last_mode = is_manual_mode  # Track mode changes
+    
+    try:
+        while True:
+            # Check for mode change and log it
+            if last_mode != is_manual_mode:
+                last_mode = is_manual_mode
+                # Mode was just switched, info already logged by toggle_mode()
+            
+            # Periodic Update Check (in both modes)
+            if time.time() - last_update_check > UPDATE_CHECK_INTERVAL_SECONDS:
+                logger.debug("Running periodic update check...")
+                try:
+                    check_and_update()  # Will exit/restart if update occurs
+                except Exception as e:
+                    logger.error(f"Periodic update check failed: {e}")
+                last_update_check = time.time()
 
-        # Keep script alive
-        keyboard.wait()
-
-    else:
-        # AUTO MODE
-        iteration_count = 0
-        last_update_check = time.time()
-        
-        try:
-            while True:
-                # Periodic Update Check
-                if time.time() - last_update_check > UPDATE_CHECK_INTERVAL_SECONDS:
-                    logger.debug("Running periodic update check...")
-                    try:
-                        check_and_update() # Will exit/restart if update occurs
-                    except Exception as e:
-                        logger.error(f"Periodic update check failed: {e}")
-                    last_update_check = time.time()
-
+            if is_manual_mode:
+                # MANUAL MODE: Just sleep and wait for hotkey triggers
+                # The keyboard listener handles hotkeys in the background
+                time.sleep(0.5)  # Short sleep to prevent CPU spinning
+            else:
+                # AUTO MODE: Poll screen and auto-detect questions
                 iteration_count += 1
-                logger.debug(f"--- Iteration {iteration_count} ---")
+                logger.debug(f"--- Auto Iteration {iteration_count} ---")
 
+                # In AUTO mode, only process MCQ and DESCRIPTIVE (not MULTI_MCQ)
                 action_taken, _ = process_screen_cycle(
                     mode_hint=None, bypass_idempotency=False
                 )
@@ -542,11 +605,11 @@ def main():
                     logger.info("Dev limit reached.")
                     break
 
-        except KeyboardInterrupt:
-            logger.info("Stopped by user.")
-        except Exception as e:
-            logger.critical(f"Error: {e}")
-            logger.debug(traceback.format_exc())
+    except KeyboardInterrupt:
+        logger.info("Stopped by user.")
+    except Exception as e:
+        logger.critical(f"Error: {e}")
+        logger.debug(traceback.format_exc())
 
 
 if __name__ == "__main__":

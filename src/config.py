@@ -303,6 +303,7 @@ HOTKEY_MCQ = os.getenv("HOTKEY_MCQ", "q")
 HOTKEY_DESCRIPTIVE = os.getenv("HOTKEY_DESCRIPTIVE", "z")
 HOTKEY_CLIPBOARD = os.getenv("HOTKEY_CLIPBOARD", "c")
 HOTKEY_MULTI_MCQ = os.getenv("HOTKEY_MULTI_MCQ", "m")
+HOTKEY_TOGGLE_MODE = os.getenv("HOTKEY_TOGGLE_MODE", "t")
 HOTKEY_DELAY = get_float_env("HOTKEY_DELAY", 2.0)
 URGENT_MODE = get_bool_env("URGENT_MODE", False)
 
