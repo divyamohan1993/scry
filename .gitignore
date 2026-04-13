@@ -83,6 +83,7 @@ coverage.xml
 # --- IDE & Editor Configs ---
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 .project
